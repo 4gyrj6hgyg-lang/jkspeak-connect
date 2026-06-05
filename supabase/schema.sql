@@ -2,7 +2,6 @@
 -- Run this in your Supabase SQL editor
 
 -- Enable RLS
-alter database postgres set "app.jwt_secret" to 'your-jwt-secret';
 
 -- Profiles (extends Supabase auth.users)
 create table public.profiles (
