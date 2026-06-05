@@ -1,13 +1,13 @@
 'use client'
-import { useState } from 'react'
+import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { createUser, assignTeacherStudent, removeAssignment, updateTeacherRate } from '@/app/admin/actions'
 
 interface Props {
   teachers: any[]
@@ -20,30 +20,26 @@ interface Props {
 
 type Tab = 'teachers' | 'students' | 'assignments' | 'sessions' | 'payroll'
 
-export default function AdminTabs({ teachers, students, assignments, sessions, payroll, allProfiles }: Props) {
+export default function AdminTabs({ teachers, students, assignments, sessions, payroll }: Props) {
   const [tab, setTab] = useState<Tab>('teachers')
-  const router = useRouter()
 
   const tabs: { id: Tab; label: string }[] = [
-    { id: 'teachers', label: 'Teachers' },
-    { id: 'students', label: 'Students' },
-    { id: 'assignments', label: 'Assignments' },
-    { id: 'sessions', label: 'Sessions' },
+    { id: 'teachers', label: '👩‍🏫 Teachers' },
+    { id: 'students', label: '🎓 Students' },
+    { id: 'assignments', label: '🔗 Assignments' },
+    { id: 'sessions', label: '📅 Sessions' },
     { id: 'payroll', label: '💰 Payroll' },
   ]
 
   return (
     <div>
-      {/* Tab Nav */}
       <div className="flex border-b border-gray-200 mb-6 overflow-x-auto">
         {tabs.map(t => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
             className={`px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
-              tab === t.id
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+              tab === t.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
             {t.label}
@@ -51,79 +47,97 @@ export default function AdminTabs({ teachers, students, assignments, sessions, p
         ))}
       </div>
 
-      {tab === 'teachers' && <TeachersTab teachers={teachers} allProfiles={allProfiles} router={router} />}
-      {tab === 'students' && <StudentsTab students={students} allProfiles={allProfiles} router={router} />}
-      {tab === 'assignments' && <AssignmentsTab teachers={teachers} students={students} assignments={assignments} router={router} />}
+      {tab === 'teachers' && <TeachersTab teachers={teachers} />}
+      {tab === 'students' && <StudentsTab students={students} />}
+      {tab === 'assignments' && <AssignmentsTab teachers={teachers} students={students} assignments={assignments} />}
       {tab === 'sessions' && <SessionsTab sessions={sessions} />}
-      {tab === 'payroll' && <PayrollTab payroll={payroll} teachers={teachers} router={router} />}
+      {tab === 'payroll' && <PayrollTab payroll={payroll} />}
     </div>
   )
 }
 
-// ── Teachers Tab ──────────────────────────────────────────────
-function TeachersTab({ teachers, allProfiles, router }: any) {
-  const [showAdd, setShowAdd] = useState(false)
-  const [profileId, setProfileId] = useState('')
+// ── Create User Form (shared) ──────────────────────────────────
+function CreateUserForm({ role, onSuccess }: { role: 'teacher' | 'student'; onSuccess: () => void }) {
+  const [fullName, setFullName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [rate, setRate] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [isPending, startTransition] = useTransition()
 
-  const unassignedProfiles = allProfiles.filter(
-    (p: any) => p.role === 'teacher' && !teachers.find((t: any) => t.profile_id === p.id)
-  )
-
-  const handleAdd = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
-    const supabase = createClient()
-    await supabase.from('teachers').insert({ profile_id: profileId, rate_per_class: Number(rate) })
-    setShowAdd(false)
-    setProfileId('')
-    setRate('')
-    router.refresh()
-    setLoading(false)
+    setError('')
+    startTransition(async () => {
+      const result = await createUser({
+        email, password, full_name: fullName, role,
+        rate_per_class: role === 'teacher' ? Number(rate) : undefined,
+      })
+      if (result.error) { setError(result.error); return }
+      setFullName(''); setEmail(''); setPassword(''); setRate('')
+      onSuccess()
+    })
   }
 
-  const updateRate = async (teacherId: string, newRate: string) => {
-    const supabase = createClient()
-    await supabase.from('teachers').update({ rate_per_class: Number(newRate) }).eq('id', teacherId)
-    router.refresh()
-  }
+  return (
+    <Card className="border-blue-100 bg-blue-50">
+      <CardContent className="pt-4">
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label>Full Name</Label>
+              <Input placeholder="Jane Smith" value={fullName} onChange={e => setFullName(e.target.value)} required />
+            </div>
+            <div className="space-y-1">
+              <Label>Email</Label>
+              <Input type="email" placeholder="jane@example.com" value={email} onChange={e => setEmail(e.target.value)} required />
+            </div>
+            <div className="space-y-1">
+              <Label>Password</Label>
+              <Input type="password" placeholder="Temporary password" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} />
+            </div>
+            {role === 'teacher' && (
+              <div className="space-y-1">
+                <Label>Rate per Class ($)</Label>
+                <Input type="number" min="0" step="0.01" placeholder="25.00" value={rate} onChange={e => setRate(e.target.value)} required />
+              </div>
+            )}
+          </div>
+          {error && <p className="text-sm text-red-600 bg-red-50 p-2 rounded">{error}</p>}
+          <div className="flex gap-2">
+            <Button type="submit" disabled={isPending} size="sm">
+              {isPending ? 'Creating…' : `Create ${role === 'teacher' ? 'Teacher' : 'Student'}`}
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  )
+}
+
+// ── Teachers Tab ──────────────────────────────────────────────
+function TeachersTab({ teachers }: { teachers: any[] }) {
+  const [showForm, setShowForm] = useState(false)
+  const [isPending, startTransition] = useTransition()
+  const router = useRouter()
 
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <h3 className="font-medium text-gray-800">All Teachers ({teachers.length})</h3>
-        <Button size="sm" onClick={() => setShowAdd(!showAdd)}>+ Add Teacher</Button>
+        <h3 className="font-medium text-gray-800">Teachers ({teachers.length})</h3>
+        <Button size="sm" onClick={() => setShowForm(!showForm)}>
+          {showForm ? 'Cancel' : '+ Add Teacher'}
+        </Button>
       </div>
 
-      {showAdd && (
-        <Card>
-          <CardContent className="pt-4">
-            <form onSubmit={handleAdd} className="flex gap-3 items-end flex-wrap">
-              <div className="space-y-1 flex-1 min-w-48">
-                <Label>Teacher Profile</Label>
-                <select
-                  className="flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm"
-                  value={profileId} onChange={e => setProfileId(e.target.value)} required
-                >
-                  <option value="">Select profile…</option>
-                  {unassignedProfiles.map((p: any) => (
-                    <option key={p.id} value={p.id}>{p.full_name} ({p.email})</option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-1 w-36">
-                <Label>Rate per Class ($)</Label>
-                <Input type="number" min="0" step="0.01" value={rate} onChange={e => setRate(e.target.value)} required />
-              </div>
-              <Button type="submit" disabled={loading}>Add</Button>
-              <Button type="button" variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
-            </form>
-          </CardContent>
-        </Card>
+      {showForm && (
+        <CreateUserForm role="teacher" onSuccess={() => { setShowForm(false); router.refresh() }} />
       )}
 
       <div className="space-y-2">
+        {teachers.length === 0 && (
+          <p className="text-gray-400 text-sm text-center py-8">No teachers yet. Add one above.</p>
+        )}
         {teachers.map((t: any) => (
           <Card key={t.id}>
             <CardContent className="py-3">
@@ -133,12 +147,17 @@ function TeachersTab({ teachers, allProfiles, router }: any) {
                   <p className="text-sm text-gray-500">{t.profile.email}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Label className="text-xs text-gray-500">Rate/class:</Label>
+                  <span className="text-xs text-gray-500">Rate/class:</span>
                   <input
                     type="number"
                     className="w-24 h-8 rounded border border-gray-300 px-2 text-sm"
                     defaultValue={t.rate_per_class}
-                    onBlur={e => updateRate(t.id, e.target.value)}
+                    onBlur={e => {
+                      startTransition(async () => {
+                        await updateTeacherRate(t.id, Number(e.target.value))
+                        router.refresh()
+                      })
+                    }}
                   />
                 </div>
               </div>
@@ -151,57 +170,27 @@ function TeachersTab({ teachers, allProfiles, router }: any) {
 }
 
 // ── Students Tab ──────────────────────────────────────────────
-function StudentsTab({ students, allProfiles, router }: any) {
-  const [showAdd, setShowAdd] = useState(false)
-  const [profileId, setProfileId] = useState('')
-  const [loading, setLoading] = useState(false)
-
-  const unassigned = allProfiles.filter(
-    (p: any) => p.role === 'student' && !students.find((s: any) => s.profile_id === p.id)
-  )
-
-  const handleAdd = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    const supabase = createClient()
-    await supabase.from('students').insert({ profile_id: profileId })
-    setShowAdd(false)
-    setProfileId('')
-    router.refresh()
-    setLoading(false)
-  }
+function StudentsTab({ students }: { students: any[] }) {
+  const [showForm, setShowForm] = useState(false)
+  const router = useRouter()
 
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <h3 className="font-medium text-gray-800">All Students ({students.length})</h3>
-        <Button size="sm" onClick={() => setShowAdd(!showAdd)}>+ Add Student</Button>
+        <h3 className="font-medium text-gray-800">Students ({students.length})</h3>
+        <Button size="sm" onClick={() => setShowForm(!showForm)}>
+          {showForm ? 'Cancel' : '+ Add Student'}
+        </Button>
       </div>
 
-      {showAdd && (
-        <Card>
-          <CardContent className="pt-4">
-            <form onSubmit={handleAdd} className="flex gap-3 items-end">
-              <div className="space-y-1 flex-1">
-                <Label>Student Profile</Label>
-                <select
-                  className="flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm"
-                  value={profileId} onChange={e => setProfileId(e.target.value)} required
-                >
-                  <option value="">Select profile…</option>
-                  {unassigned.map((p: any) => (
-                    <option key={p.id} value={p.id}>{p.full_name} ({p.email})</option>
-                  ))}
-                </select>
-              </div>
-              <Button type="submit" disabled={loading}>Add</Button>
-              <Button type="button" variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
-            </form>
-          </CardContent>
-        </Card>
+      {showForm && (
+        <CreateUserForm role="student" onSuccess={() => { setShowForm(false); router.refresh() }} />
       )}
 
       <div className="space-y-2">
+        {students.length === 0 && (
+          <p className="text-gray-400 text-sm text-center py-8">No students yet. Add one above.</p>
+        )}
         {students.map((s: any) => (
           <Card key={s.id}>
             <CardContent className="py-3">
@@ -216,26 +205,29 @@ function StudentsTab({ students, allProfiles, router }: any) {
 }
 
 // ── Assignments Tab ───────────────────────────────────────────
-function AssignmentsTab({ teachers, students, assignments, router }: any) {
+function AssignmentsTab({ teachers, students, assignments }: any) {
   const [teacherId, setTeacherId] = useState('')
   const [studentId, setStudentId] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [isPending, startTransition] = useTransition()
+  const router = useRouter()
 
-  const handleAssign = async (e: React.FormEvent) => {
+  const handleAssign = (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
-    const supabase = createClient()
-    await supabase.from('teacher_students').insert({ teacher_id: teacherId, student_id: studentId })
-    setTeacherId('')
-    setStudentId('')
-    router.refresh()
-    setLoading(false)
+    setError('')
+    startTransition(async () => {
+      const result = await assignTeacherStudent(teacherId, studentId)
+      if (result.error) { setError(result.error); return }
+      setTeacherId(''); setStudentId('')
+      router.refresh()
+    })
   }
 
-  const handleRemove = async (id: string) => {
-    const supabase = createClient()
-    await supabase.from('teacher_students').delete().eq('id', id)
-    router.refresh()
+  const handleRemove = (id: string) => {
+    startTransition(async () => {
+      await removeAssignment(id)
+      router.refresh()
+    })
   }
 
   const enriched = assignments.map((a: any) => ({
@@ -249,46 +241,56 @@ function AssignmentsTab({ teachers, students, assignments, router }: any) {
       <h3 className="font-medium text-gray-800">Assign Teacher → Student</h3>
       <Card>
         <CardContent className="pt-4">
-          <form onSubmit={handleAssign} className="flex gap-3 items-end flex-wrap">
-            <div className="space-y-1 flex-1 min-w-48">
-              <Label>Teacher</Label>
-              <select
-                className="flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm"
-                value={teacherId} onChange={e => setTeacherId(e.target.value)} required
-              >
-                <option value="">Select teacher…</option>
-                {teachers.map((t: any) => (
-                  <option key={t.id} value={t.id}>{t.profile.full_name}</option>
-                ))}
-              </select>
+          <form onSubmit={handleAssign} className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Teacher</Label>
+                <select
+                  className="flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm"
+                  value={teacherId} onChange={e => setTeacherId(e.target.value)} required
+                >
+                  <option value="">Select teacher…</option>
+                  {teachers.map((t: any) => (
+                    <option key={t.id} value={t.id}>{t.profile.full_name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <Label>Student</Label>
+                <select
+                  className="flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm"
+                  value={studentId} onChange={e => setStudentId(e.target.value)} required
+                >
+                  <option value="">Select student…</option>
+                  {students.map((s: any) => (
+                    <option key={s.id} value={s.id}>{s.profile.full_name}</option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <div className="space-y-1 flex-1 min-w-48">
-              <Label>Student</Label>
-              <select
-                className="flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm"
-                value={studentId} onChange={e => setStudentId(e.target.value)} required
-              >
-                <option value="">Select student…</option>
-                {students.map((s: any) => (
-                  <option key={s.id} value={s.id}>{s.profile.full_name}</option>
-                ))}
-              </select>
-            </div>
-            <Button type="submit" disabled={loading}>Assign</Button>
+            {error && <p className="text-sm text-red-600 bg-red-50 p-2 rounded">{error}</p>}
+            <Button type="submit" disabled={isPending} size="sm">
+              {isPending ? 'Assigning…' : 'Assign'}
+            </Button>
           </form>
         </CardContent>
       </Card>
 
       <div className="space-y-2">
+        {enriched.length === 0 && (
+          <p className="text-gray-400 text-sm text-center py-8">No assignments yet.</p>
+        )}
         {enriched.map((a: any) => (
           <Card key={a.id}>
             <CardContent className="py-3 flex items-center justify-between">
-              <div>
-                <span className="font-medium">{a.teacher?.profile?.full_name}</span>
-                <span className="text-gray-400 mx-2">→</span>
-                <span className="font-medium">{a.student?.profile?.full_name}</span>
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-gray-900">{a.teacher?.profile?.full_name}</span>
+                <span className="text-gray-400">→</span>
+                <span className="font-medium text-gray-900">{a.student?.profile?.full_name}</span>
               </div>
-              <Button size="sm" variant="destructive" onClick={() => handleRemove(a.id)}>Remove</Button>
+              <Button size="sm" variant="destructive" disabled={isPending} onClick={() => handleRemove(a.id)}>
+                Remove
+              </Button>
             </CardContent>
           </Card>
         ))}
@@ -299,13 +301,19 @@ function AssignmentsTab({ teachers, students, assignments, router }: any) {
 
 // ── Sessions Tab ──────────────────────────────────────────────
 function SessionsTab({ sessions }: any) {
-  const statusVariant: Record<string, any> = {
-    open: 'success', closed: 'warning', completed: 'secondary', cancelled: 'destructive'
+  const statusColor: Record<string, string> = {
+    open: 'bg-green-100 text-green-700',
+    closed: 'bg-yellow-100 text-yellow-700',
+    completed: 'bg-blue-100 text-blue-700',
+    cancelled: 'bg-red-100 text-red-700',
   }
 
   return (
     <div className="space-y-3">
       <h3 className="font-medium text-gray-800">All Sessions ({sessions.length})</h3>
+      {sessions.length === 0 && (
+        <p className="text-gray-400 text-sm text-center py-8">No sessions yet. Teachers create sessions from their dashboard.</p>
+      )}
       {sessions.map((s: any) => (
         <Card key={s.id}>
           <CardContent className="py-3">
@@ -317,7 +325,9 @@ function SessionsTab({ sessions }: any) {
                 </p>
                 <p className="text-xs text-gray-400">{formatDateTime(s.scheduled_at)} · {s.duration_minutes} min</p>
               </div>
-              <Badge variant={statusVariant[s.status]}>{s.status}</Badge>
+              <span className={`text-xs font-semibold px-2 py-1 rounded-full ${statusColor[s.status]}`}>
+                {s.status}
+              </span>
             </div>
           </CardContent>
         </Card>
@@ -327,19 +337,18 @@ function SessionsTab({ sessions }: any) {
 }
 
 // ── Payroll Tab ───────────────────────────────────────────────
-function PayrollTab({ payroll, teachers, router }: any) {
+function PayrollTab({ payroll }: { payroll: any[] }) {
   const total = payroll.reduce((sum: number, t: any) => sum + t.total_pay, 0)
 
   const exportCSV = () => {
     const rows = [
       ['Teacher', 'Rate per Class', 'Completed Sessions', 'Total Pay'],
-      ...payroll.map((t: any) => [t.teacher_name, t.rate_per_class, t.completed_sessions, t.total_pay])
+      ...payroll.map((t: any) => [t.teacher_name, t.rate_per_class, t.completed_sessions, t.total_pay]),
     ]
     const csv = rows.map(r => r.join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = url
+    a.href = URL.createObjectURL(blob)
     a.download = `jkspeak-payroll-${new Date().toISOString().split('T')[0]}.csv`
     a.click()
   }
@@ -350,35 +359,39 @@ function PayrollTab({ payroll, teachers, router }: any) {
         <h3 className="font-medium text-gray-800">Payroll Summary</h3>
         <Button size="sm" variant="outline" onClick={exportCSV}>⬇ Export CSV</Button>
       </div>
-
       <Card>
         <CardContent className="pt-4">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-200 text-left">
-                <th className="pb-2 font-medium text-gray-600">Teacher</th>
-                <th className="pb-2 font-medium text-gray-600 text-right">Rate/Class</th>
-                <th className="pb-2 font-medium text-gray-600 text-right">Sessions</th>
-                <th className="pb-2 font-medium text-gray-600 text-right">Total Pay</th>
-              </tr>
-            </thead>
-            <tbody>
-              {payroll.map((t: any) => (
-                <tr key={t.teacher_id} className="border-b border-gray-100">
-                  <td className="py-3 font-medium text-gray-900">{t.teacher_name}</td>
-                  <td className="py-3 text-right text-gray-600">{formatCurrency(t.rate_per_class)}</td>
-                  <td className="py-3 text-right text-gray-600">{t.completed_sessions}</td>
-                  <td className="py-3 text-right font-semibold text-green-700">{formatCurrency(t.total_pay)}</td>
+          {payroll.length === 0 && (
+            <p className="text-gray-400 text-sm text-center py-4">No completed sessions yet.</p>
+          )}
+          {payroll.length > 0 && (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 text-left">
+                  <th className="pb-2 font-medium text-gray-600">Teacher</th>
+                  <th className="pb-2 font-medium text-gray-600 text-right">Rate</th>
+                  <th className="pb-2 font-medium text-gray-600 text-right">Sessions</th>
+                  <th className="pb-2 font-medium text-gray-600 text-right">Total</th>
                 </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                <td colSpan={3} className="pt-3 font-bold text-gray-800">Total Payroll</td>
-                <td className="pt-3 text-right font-bold text-green-700 text-base">{formatCurrency(total)}</td>
-              </tr>
-            </tfoot>
-          </table>
+              </thead>
+              <tbody>
+                {payroll.map((t: any) => (
+                  <tr key={t.teacher_id} className="border-b border-gray-100">
+                    <td className="py-3 font-medium">{t.teacher_name}</td>
+                    <td className="py-3 text-right text-gray-600">{formatCurrency(t.rate_per_class)}</td>
+                    <td className="py-3 text-right text-gray-600">{t.completed_sessions}</td>
+                    <td className="py-3 text-right font-semibold text-green-700">{formatCurrency(t.total_pay)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={3} className="pt-3 font-bold">Total Payroll</td>
+                  <td className="pt-3 text-right font-bold text-green-700 text-lg">{formatCurrency(total)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          )}
         </CardContent>
       </Card>
     </div>
