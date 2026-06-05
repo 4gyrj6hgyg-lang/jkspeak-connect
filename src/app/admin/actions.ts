@@ -37,18 +37,20 @@ export async function createUser(formData: {
 
   const uid = newUser.user.id
 
-  // Insert profile
+  // Upsert profile (trigger may have already created it)
   const { error: profileError } = await admin
     .from('profiles')
-    .insert({ id: uid, email: formData.email, full_name: formData.full_name, role: formData.role })
+    .upsert({ id: uid, email: formData.email, full_name: formData.full_name, role: formData.role })
 
   if (profileError) return { error: profileError.message }
 
-  // Insert into teachers or students
+  // Insert into teachers or students — ignore if already exists
   if (formData.role === 'teacher') {
-    await admin.from('teachers').insert({ profile_id: uid, rate_per_class: formData.rate_per_class ?? 0 })
+    const { error: te } = await admin.from('teachers').upsert({ profile_id: uid, rate_per_class: formData.rate_per_class ?? 0 }, { onConflict: 'profile_id' })
+    if (te) return { error: te.message }
   } else {
-    await admin.from('students').insert({ profile_id: uid })
+    const { error: se } = await admin.from('students').upsert({ profile_id: uid }, { onConflict: 'profile_id' })
+    if (se) return { error: se.message }
   }
 
   return { success: true, userId: uid }
