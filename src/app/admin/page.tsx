@@ -26,10 +26,10 @@ export default async function AdminDashboard() {
     { data: sessions },
     { data: allProfiles },
   ] = await Promise.all([
-    supabase.from('teachers').select('*, profile:profiles(full_name, email)'),
-    supabase.from('students').select('*, profile:profiles(full_name, email)'),
+    supabase.from('teachers').select('*, profile:profiles!teachers_profile_id_fkey(full_name, email)'),
+    supabase.from('students').select('*, profile:profiles!students_profile_id_fkey(full_name, email)'),
     supabase.from('teacher_students').select('*'),
-    supabase.from('sessions').select('*, teacher:teachers(profile:profiles(full_name)), student:students(profile:profiles(full_name))').order('scheduled_at', { ascending: false }),
+    supabase.from('sessions').select('*, teacher:teachers!sessions_teacher_id_fkey(profile:profiles!teachers_profile_id_fkey(full_name)), student:students!sessions_student_id_fkey(profile:profiles!students_profile_id_fkey(full_name))').order('scheduled_at', { ascending: false }),
     supabase.from('profiles').select('*').order('full_name'),
   ])
 
@@ -40,10 +40,10 @@ export default async function AdminDashboard() {
     ).length
     return {
       teacher_id: teacher.id,
-      teacher_name: teacher.profile.full_name,
-      rate_per_class: teacher.rate_per_class,
+      teacher_name: teacher.profile?.full_name ?? 'Unknown',
+      rate_per_class: teacher.rate_per_class ?? 0,
       completed_sessions: completed,
-      total_pay: completed * teacher.rate_per_class,
+      total_pay: completed * (teacher.rate_per_class ?? 0),
     }
   })
 
