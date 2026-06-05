@@ -1,9 +1,17 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { Card, CardContent } from '@/components/ui/card'
 import { formatCurrency } from '@/lib/utils'
 import LogoutButton from '@/components/LogoutButton'
 import AdminTabs from '@/components/AdminTabs'
+
+function getServiceClient() {
+  return createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+}
 
 export default async function AdminDashboard() {
   const supabase = await createClient()
@@ -18,7 +26,9 @@ export default async function AdminDashboard() {
 
   if (!profile || profile.role !== 'admin') redirect('/')
 
-  // Load all data for admin
+  // Use service role for all admin data queries (bypasses RLS)
+  const admin = getServiceClient()
+
   const [
     { data: teachers },
     { data: students },
@@ -26,11 +36,11 @@ export default async function AdminDashboard() {
     { data: sessions },
     { data: allProfiles },
   ] = await Promise.all([
-    supabase.from('teachers').select('*, profile:profiles!teachers_profile_id_fkey(full_name, email)'),
-    supabase.from('students').select('*, profile:profiles!students_profile_id_fkey(full_name, email)'),
-    supabase.from('teacher_students').select('*'),
-    supabase.from('sessions').select('*, teacher:teachers!sessions_teacher_id_fkey(profile:profiles!teachers_profile_id_fkey(full_name)), student:students!sessions_student_id_fkey(profile:profiles!students_profile_id_fkey(full_name))').order('scheduled_at', { ascending: false }),
-    supabase.from('profiles').select('*').order('full_name'),
+    admin.from('teachers').select('*, profile:profiles(full_name, email)'),
+    admin.from('students').select('*, profile:profiles(full_name, email)'),
+    admin.from('teacher_students').select('*'),
+    admin.from('sessions').select('*, teacher:teachers(profile:profiles(full_name)), student:students(profile:profiles(full_name))').order('scheduled_at', { ascending: false }),
+    admin.from('profiles').select('*').order('full_name'),
   ])
 
   // Payroll calculation
@@ -63,7 +73,6 @@ export default async function AdminDashboard() {
       </header>
 
       <main className="max-w-6xl mx-auto p-6 space-y-6">
-        {/* Overview Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <Card>
             <CardContent className="pt-6 text-center">
@@ -93,7 +102,6 @@ export default async function AdminDashboard() {
           </Card>
         </div>
 
-        {/* Tabbed Admin Interface */}
         <AdminTabs
           teachers={teachers ?? []}
           students={students ?? []}
