@@ -1,9 +1,7 @@
 -- JK Speak Connect — Database Schema
 -- Run this in your Supabase SQL editor
 
--- Enable RLS
-
--- Profiles (extends Supabase auth.users)
+-- ── Profiles (extends Supabase auth.users) ──────────────────
 create table public.profiles (
   id uuid references auth.users on delete cascade primary key,
   email text not null,
@@ -19,14 +17,14 @@ create policy "Users can update own profile" on public.profiles
   for update using (auth.uid() = id);
 create policy "Admins can view all profiles" on public.profiles
   for select using (
-    exists (select 1 from public.profiles where id = auth.uid() and role = 'admin')
+    exists (select 1 from public.profiles p2 where p2.id = auth.uid() and p2.role = 'admin')
   );
 create policy "Admins can insert profiles" on public.profiles
   for insert with check (
-    exists (select 1 from public.profiles where id = auth.uid() and role = 'admin')
+    exists (select 1 from public.profiles p2 where p2.id = auth.uid() and p2.role = 'admin')
   );
 
--- Teachers
+-- ── Teachers ─────────────────────────────────────────────────
 create table public.teachers (
   id uuid default gen_random_uuid() primary key,
   profile_id uuid references public.profiles on delete cascade not null unique,
@@ -42,16 +40,8 @@ create policy "Admins full access to teachers" on public.teachers
   for all using (
     exists (select 1 from public.profiles where id = auth.uid() and role = 'admin')
   );
-create policy "Students can view assigned teachers" on public.teachers
-  for select using (
-    exists (
-      select 1 from public.teacher_students ts
-      join public.students s on s.id = ts.student_id
-      where ts.teacher_id = teachers.id and s.profile_id = auth.uid()
-    )
-  );
 
--- Students
+-- ── Students ─────────────────────────────────────────────────
 create table public.students (
   id uuid default gen_random_uuid() primary key,
   profile_id uuid references public.profiles on delete cascade not null unique,
@@ -66,7 +56,7 @@ create policy "Admins full access to students" on public.students
     exists (select 1 from public.profiles where id = auth.uid() and role = 'admin')
   );
 
--- Teacher ↔ Student assignments
+-- ── Teacher ↔ Student assignments ────────────────────────────
 create table public.teacher_students (
   id uuid default gen_random_uuid() primary key,
   teacher_id uuid references public.teachers on delete cascade not null,
@@ -89,7 +79,17 @@ create policy "Students can view own assignments" on public.teacher_students
     exists (select 1 from public.students where id = student_id and profile_id = auth.uid())
   );
 
--- Sessions (1-on-1)
+-- Add teachers policy that references teacher_students (AFTER that table exists)
+create policy "Students can view assigned teachers" on public.teachers
+  for select using (
+    exists (
+      select 1 from public.teacher_students ts
+      join public.students s on s.id = ts.student_id
+      where ts.teacher_id = teachers.id and s.profile_id = auth.uid()
+    )
+  );
+
+-- ── Sessions (1-on-1) ─────────────────────────────────────────
 create table public.sessions (
   id uuid default gen_random_uuid() primary key,
   teacher_id uuid references public.teachers on delete cascade not null,
@@ -116,7 +116,7 @@ create policy "Admins full access to sessions" on public.sessions
     exists (select 1 from public.profiles where id = auth.uid() and role = 'admin')
   );
 
--- Auto-create profile on signup
+-- ── Auto-create profile on signup ─────────────────────────────
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
@@ -135,7 +135,7 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
 
--- Indexes
+-- ── Indexes ───────────────────────────────────────────────────
 create index sessions_teacher_id_idx on public.sessions(teacher_id);
 create index sessions_student_id_idx on public.sessions(student_id);
 create index sessions_scheduled_at_idx on public.sessions(scheduled_at);
