@@ -1,6 +1,5 @@
 'use client'
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -8,7 +7,6 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
 export default function LoginPage() {
-  const router = useRouter()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -20,16 +18,31 @@ export default function LoginPage() {
     setError('')
 
     const supabase = createClient()
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password })
 
-    if (error) {
-      setError(error.message)
+    if (authError || !data.user) {
+      setError(authError?.message ?? 'Login failed')
       setLoading(false)
       return
     }
 
-    router.push('/')
-    router.refresh()
+    // Get role directly after login
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', data.user.id)
+      .single()
+
+    if (!profile) {
+      setError('Account setup incomplete. Contact your administrator.')
+      setLoading(false)
+      return
+    }
+
+    // Hard navigate so middleware and server components re-run fresh
+    if (profile.role === 'admin') window.location.href = '/admin'
+    else if (profile.role === 'teacher') window.location.href = '/teacher'
+    else window.location.href = '/student'
   }
 
   return (
@@ -39,7 +52,6 @@ export default function LoginPage() {
           <h1 className="text-4xl font-bold text-blue-700">🗣️ JK Speak</h1>
           <p className="text-gray-500 mt-2">Connect. Learn. Grow.</p>
         </div>
-
         <Card>
           <CardHeader>
             <CardTitle>Sign In</CardTitle>
