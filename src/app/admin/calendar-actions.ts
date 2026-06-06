@@ -1,8 +1,6 @@
 'use server'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
-import { createUser, assignTeacherStudent, removeAssignment, updateTeacherRate } from './actions'
-export { createUser, assignTeacherStudent, removeAssignment, updateTeacherRate }
 
 function getAdminClient() {
   return createAdminClient(
