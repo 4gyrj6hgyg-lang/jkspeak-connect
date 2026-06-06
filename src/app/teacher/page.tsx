@@ -33,7 +33,6 @@ export default async function TeacherDashboard() {
     .eq('profile_id', user.id)
     .single()
 
-  // Use service role for cross-user joins (bypasses RLS on profiles)
   const admin = getServiceClient()
 
   const { data: assignments } = await admin
@@ -66,7 +65,6 @@ export default async function TeacherDashboard() {
       </header>
 
       <main className="max-w-4xl mx-auto p-6 space-y-6">
-        {/* Stats */}
         <div className="grid grid-cols-3 gap-4">
           <Card>
             <CardContent className="pt-6 text-center">
@@ -88,7 +86,6 @@ export default async function TeacherDashboard() {
           </Card>
         </div>
 
-        {/* My Students */}
         <section>
           <h2 className="text-lg font-semibold text-gray-800 mb-3">My Students</h2>
           {!assignments?.length ? (
@@ -111,7 +108,6 @@ export default async function TeacherDashboard() {
           )}
         </section>
 
-        {/* Create Session */}
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-800">Upcoming Sessions</h2>
           <CreateSessionModal teacherId={teacher?.id} students={assignments ?? []} />
