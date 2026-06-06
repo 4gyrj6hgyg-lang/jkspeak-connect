@@ -10,13 +10,15 @@ function getAdminClient() {
 }
 
 // Toggle a 30-min availability slot on/off
+// Returns the created slot row on 'added' so client can update state without router.refresh()
 export async function toggleSlot(teacherId: string, slotStart: string) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'Not authenticated' }
 
-  // Check if slot exists
-  const { data: existing } = await supabase
+  const admin = getAdminClient()
+
+  const { data: existing } = await admin
     .from('availability_slots')
     .select('id, is_booked')
     .eq('teacher_id', teacherId)
@@ -25,18 +27,17 @@ export async function toggleSlot(teacherId: string, slotStart: string) {
 
   if (existing) {
     if (existing.is_booked) return { error: 'Slot is already booked — cannot remove' }
-    const { error } = await supabase
-      .from('availability_slots')
-      .delete()
-      .eq('id', existing.id)
+    const { error } = await admin.from('availability_slots').delete().eq('id', existing.id)
     if (error) return { error: error.message }
-    return { success: true, action: 'removed' }
+    return { success: true, action: 'removed' as const }
   } else {
-    const { error } = await supabase
+    const { data: created, error } = await admin
       .from('availability_slots')
       .insert({ teacher_id: teacherId, slot_start: slotStart })
+      .select('id, slot_start, is_booked')
+      .single()
     if (error) return { error: error.message }
-    return { success: true, action: 'added' }
+    return { success: true, action: 'added' as const, slot: created }
   }
 }
 
@@ -47,25 +48,13 @@ export async function bookSlot(slotId: string) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'Not authenticated' }
 
-  // Get student record
-  const { data: student } = await supabase
-    .from('students')
-    .select('id')
-    .eq('profile_id', user.id)
-    .single()
+  const { data: student } = await supabase.from('students').select('id').eq('profile_id', user.id).single()
   if (!student) return { error: 'Student record not found' }
 
-  // Check credits
-  const { data: credits } = await admin
-    .from('class_credits')
-    .select('total_purchased, total_used')
-    .eq('student_id', student.id)
-    .single()
-
+  const { data: credits } = await admin.from('class_credits').select('total_purchased, total_used').eq('student_id', student.id).single()
   const remaining = (credits?.total_purchased ?? 0) - (credits?.total_used ?? 0)
   if (remaining <= 0) return { error: 'No class credits remaining. Contact your admin to purchase more.' }
 
-  // Get slot details
   const { data: slot } = await admin
     .from('availability_slots')
     .select('*, teacher:teachers(id, profile_id, rate_per_class, profile:profiles(full_name, email))')
@@ -74,14 +63,8 @@ export async function bookSlot(slotId: string) {
   if (!slot) return { error: 'Slot not found' }
   if (slot.is_booked) return { error: 'Slot already booked' }
 
-  // Get student profile for email
-  const { data: studentProfile } = await admin
-    .from('profiles')
-    .select('full_name, email')
-    .eq('id', user.id)
-    .single()
+  const { data: studentProfile } = await admin.from('profiles').select('full_name, email').eq('id', user.id).single()
 
-  // Create session
   const { data: session, error: sessionErr } = await admin
     .from('sessions')
     .insert({
@@ -96,48 +79,25 @@ export async function bookSlot(slotId: string) {
     .single()
   if (sessionErr) return { error: sessionErr.message }
 
-  // Create booking
   const { error: bookingErr } = await admin
     .from('bookings')
     .insert({ slot_id: slotId, session_id: session.id, student_id: student.id })
   if (bookingErr) return { error: bookingErr.message }
 
-  // Mark slot as booked
   await admin.from('availability_slots').update({ is_booked: true }).eq('id', slotId)
+  await admin.from('class_credits').update({ total_used: (credits?.total_used ?? 0) + 1, updated_at: new Date().toISOString() }).eq('student_id', student.id)
 
-  // Deduct credit
-  await admin
-    .from('class_credits')
-    .update({ total_used: (credits?.total_used ?? 0) + 1, updated_at: new Date().toISOString() })
-    .eq('student_id', student.id)
-
-  // Send confirmation emails via Supabase Edge Function or just log for now
-  // We'll handle email via a simple fetch to an API route
   try {
     const teacherEmail = (slot.teacher as any)?.profile?.email
     const teacherName = (slot.teacher as any)?.profile?.full_name
     const slotDate = new Date(slot.slot_start)
     const dateStr = slotDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'America/Chicago' })
     const timeStr = slotDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Chicago' })
-
     await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-email`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
-      },
-      body: JSON.stringify({
-        type: 'booking_confirmation',
-        sessionId: session.id,
-        studentEmail: studentProfile?.email,
-        studentName: studentProfile?.full_name,
-        teacherEmail,
-        teacherName,
-        date: dateStr,
-        time: timeStr,
-        creditsRemaining: remaining - 1,
-      }),
-    }).catch(() => {}) // don't fail booking if email fails
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}` },
+      body: JSON.stringify({ type: 'booking_confirmation', sessionId: session.id, studentEmail: studentProfile?.email, studentName: studentProfile?.full_name, teacherEmail, teacherName, date: dateStr, time: timeStr, creditsRemaining: remaining - 1 }),
+    }).catch(() => {})
   } catch {}
 
   return { success: true, sessionId: session.id, creditsRemaining: remaining - 1 }
