@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import { createUser, assignTeacherStudent, removeAssignment, updateTeacherRate } from '@/app/admin/actions'
+import { setStudentCredits } from '@/app/admin/calendar-actions'
 
 interface Props {
   teachers: any[]
@@ -16,11 +17,12 @@ interface Props {
   sessions: any[]
   payroll: any[]
   allProfiles: any[]
+  credits: any[]
 }
 
 type Tab = 'teachers' | 'students' | 'assignments' | 'sessions' | 'payroll'
 
-export default function AdminTabs({ teachers, students, assignments, sessions, payroll }: Props) {
+export default function AdminTabs({ teachers, students, assignments, sessions, payroll, credits }: Props) {
   const [tab, setTab] = useState<Tab>('teachers')
 
   const tabs: { id: Tab; label: string }[] = [
@@ -48,7 +50,7 @@ export default function AdminTabs({ teachers, students, assignments, sessions, p
       </div>
 
       {tab === 'teachers' && <TeachersTab teachers={teachers} />}
-      {tab === 'students' && <StudentsTab students={students} />}
+      {tab === 'students' && <StudentsTab students={students} credits={credits} />}
       {tab === 'assignments' && <AssignmentsTab teachers={teachers} students={students} assignments={assignments} />}
       {tab === 'sessions' && <SessionsTab sessions={sessions} />}
       {tab === 'payroll' && <PayrollTab payroll={payroll} />}
@@ -170,9 +172,12 @@ function TeachersTab({ teachers }: { teachers: any[] }) {
 }
 
 // ── Students Tab ──────────────────────────────────────────────
-function StudentsTab({ students }: { students: any[] }) {
+function StudentsTab({ students, credits }: { students: any[]; credits: any[] }) {
   const [showForm, setShowForm] = useState(false)
+  const [isPending, startTransition] = useTransition()
   const router = useRouter()
+
+  const creditMap = new Map(credits.map((c: any) => [c.student_id, c]))
 
   return (
     <div className="space-y-4">
@@ -191,18 +196,50 @@ function StudentsTab({ students }: { students: any[] }) {
         {students.length === 0 && (
           <p className="text-gray-400 text-sm text-center py-8">No students yet. Add one above.</p>
         )}
-        {students.map((s: any) => (
-          <Card key={s.id}>
-            <CardContent className="py-3">
-              <p className="font-medium text-gray-900">{s.profile.full_name}</p>
-              <p className="text-sm text-gray-500">{s.profile.email}</p>
-            </CardContent>
-          </Card>
-        ))}
+        {students.map((s: any) => {
+          const credit = creditMap.get(s.id)
+          const purchased = credit?.total_purchased ?? 0
+          const used = credit?.total_used ?? 0
+          const remaining = purchased - used
+          return (
+            <Card key={s.id}>
+              <CardContent className="py-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="font-medium text-gray-900">{s.profile.full_name}</p>
+                    <p className="text-sm text-gray-500">{s.profile.email}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500">Classes remaining</p>
+                      <p className={`text-lg font-bold ${remaining === 0 ? 'text-red-500' : remaining <= 3 ? 'text-orange-500' : 'text-green-600'}`}>{remaining}</p>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <p className="text-xs text-gray-500">Set total purchased</p>
+                      <input
+                        type="number"
+                        min="0"
+                        className="w-20 h-8 rounded border border-gray-300 px-2 text-sm"
+                        defaultValue={purchased}
+                        onBlur={e => {
+                          startTransition(async () => {
+                            await setStudentCredits(s.id, Number(e.target.value))
+                            router.refresh()
+                          })
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )
+        })}
       </div>
     </div>
   )
 }
+
 
 // ── Assignments Tab ───────────────────────────────────────────
 function AssignmentsTab({ teachers, students, assignments }: any) {

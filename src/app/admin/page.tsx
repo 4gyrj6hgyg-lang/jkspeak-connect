@@ -34,13 +34,15 @@ export default async function AdminDashboard() {
     { data: assignments },
     { data: sessions },
     { data: allProfiles },
+    { data: credits },
   ] = await Promise.all([
     admin.from('teachers').select('*, profile:profiles(full_name, email)'),
     admin.from('students').select('*, profile:profiles(full_name, email)'),
     admin.from('teacher_students').select('*'),
     admin.from('sessions').select('*, teacher:teachers(profile:profiles(full_name)), student:students(profile:profiles(full_name))').order('scheduled_at', { ascending: false }),
     admin.from('profiles').select('*').order('full_name'),
-  ])
+    admin.from('class_credits').select('*'),
+      ])
 
   const payroll = (teachers ?? []).map((teacher: any) => {
     const completed = (sessions ?? []).filter(
@@ -107,7 +109,8 @@ export default async function AdminDashboard() {
           sessions={sessions ?? []}
           payroll={payroll}
           allProfiles={allProfiles ?? []}
-        />
+          credits={credits ?? []}
+                  />
       </main>
     </div>
   )
