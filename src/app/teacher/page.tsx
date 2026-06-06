@@ -22,20 +22,56 @@ export default async function TeacherDashboard() {
   const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single()
   if (!profile || profile.role !== 'teacher') redirect('/')
 
-  const { data: teacher } = await supabase.from('teachers').select('*').eq('profile_id', user.id).single()
-
   const admin = getServiceClient()
 
-  const [{ data: assignments }, { data: sessions }, { data: slots }] = await Promise.all([
-    admin.from('teacher_students').select('student_id, student:students(id, profile:profiles(full_name, email))').eq('teacher_id', teacher?.id ?? ''),
-    admin.from('sessions').select('*, student:students(profile:profiles(full_name))').eq('teacher_id', teacher?.id ?? '').order('scheduled_at', { ascending: false }).limit(50),
-    admin.from('availability_slots').select('id, slot_start, is_booked').eq('teacher_id', teacher?.id ?? '').gte('slot_start', new Date(Date.now() - 7 * 86400000).toISOString()),
-  ])
+  // Get teacher record using service client to avoid RLS issues
+  const { data: teacher } = await admin.from('teachers').select('*').eq('profile_id', user.id).single()
+
+  if (!teacher) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <p className="text-gray-500">Teacher record not found. Contact your admin.</p>
+      </div>
+    )
+  }
+
+  // Step 1: get assignment rows
+  const { data: assignmentRows } = await admin
+    .from('teacher_students')
+    .select('student_id')
+    .eq('teacher_id', teacher.id)
+
+  // Step 2: get student profiles separately
+  const studentIds = (assignmentRows ?? []).map((a: any) => a.student_id)
+
+  let studentDetails: any[] = []
+  if (studentIds.length > 0) {
+    const { data: students } = await admin
+      .from('students')
+      .select('id, profile:profiles(full_name, email)')
+      .in('id', studentIds)
+    studentDetails = students ?? []
+  }
+
+  // Sessions
+  const { data: sessions } = await admin
+    .from('sessions')
+    .select('*, student:students(profile:profiles(full_name))')
+    .eq('teacher_id', teacher.id)
+    .order('scheduled_at', { ascending: false })
+    .limit(50)
+
+  // Availability slots (past week + future)
+  const { data: slots } = await admin
+    .from('availability_slots')
+    .select('id, slot_start, is_booked')
+    .eq('teacher_id', teacher.id)
+    .gte('slot_start', new Date(Date.now() - 7 * 86400000).toISOString())
 
   const now = new Date()
-  const upcoming = sessions?.filter(s => ['open', 'closed'].includes(s.status) && new Date(s.scheduled_at) >= now) ?? []
-  const past = sessions?.filter(s => s.status === 'completed' || new Date(s.scheduled_at) < now) ?? []
-  const totalCompleted = sessions?.filter(s => s.status === 'completed').length ?? 0
+  const upcoming = (sessions ?? []).filter((s: any) => ['open', 'closed'].includes(s.status) && new Date(s.scheduled_at) >= now)
+  const past = (sessions ?? []).filter((s: any) => s.status === 'completed' || new Date(s.scheduled_at) < now)
+  const totalCompleted = (sessions ?? []).filter((s: any) => s.status === 'completed').length
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -54,7 +90,7 @@ export default async function TeacherDashboard() {
         {/* Stats */}
         <div className="grid grid-cols-3 gap-4">
           <Card><CardContent className="pt-6 text-center">
-            <p className="text-3xl font-bold text-blue-600">{assignments?.length ?? 0}</p>
+            <p className="text-3xl font-bold text-blue-600">{studentDetails.length}</p>
             <p className="text-sm text-gray-500 mt-1">Students</p>
           </CardContent></Card>
           <Card><CardContent className="pt-6 text-center">
@@ -67,40 +103,36 @@ export default async function TeacherDashboard() {
           </CardContent></Card>
         </div>
 
-        {/* Calendar */}
-        <Card>
-          <CardContent className="pt-4">
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">My Availability</h2>
-            <p className="text-sm text-gray-500 mb-4">Click a day, then click time slots to mark them open for students to book.</p>
-            {teacher ? (
-              <TeacherCalendar teacherId={teacher.id} slots={slots ?? []} />
-            ) : (
-              <p className="text-gray-400 text-sm">Teacher record not found.</p>
-            )}
-          </CardContent>
-        </Card>
-
         {/* My Students */}
         <section>
           <h2 className="text-lg font-semibold text-gray-800 mb-3">My Students</h2>
-          {!assignments?.length ? (
-            <Card><CardContent className="py-6 text-center text-gray-400 text-sm">No students assigned yet.</CardContent></Card>
+          {studentDetails.length === 0 ? (
+            <Card><CardContent className="py-6 text-center text-gray-400 text-sm">No students assigned yet. Ask your admin to assign students to you.</CardContent></Card>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {assignments.map((a: any) => (
-                <Card key={a.student_id}><CardContent className="py-3">
-                  <p className="font-medium text-gray-900">{a.student?.profile?.full_name}</p>
-                  <p className="text-sm text-gray-500">{a.student?.profile?.email}</p>
+              {studentDetails.map((s: any) => (
+                <Card key={s.id}><CardContent className="py-3">
+                  <p className="font-medium text-gray-900">{s.profile?.full_name}</p>
+                  <p className="text-sm text-gray-500">{s.profile?.email}</p>
                 </CardContent></Card>
               ))}
             </div>
           )}
         </section>
 
+        {/* Calendar */}
+        <Card>
+          <CardContent className="pt-4">
+            <h2 className="text-lg font-semibold text-gray-800 mb-2">My Availability</h2>
+            <p className="text-sm text-gray-500 mb-4">Click a day, then click time slots to mark them open for students to book.</p>
+            <TeacherCalendar teacherId={teacher.id} slots={slots ?? []} />
+          </CardContent>
+        </Card>
+
         {/* Upcoming Sessions */}
         <section>
           <h2 className="text-lg font-semibold text-gray-800 mb-3">Upcoming Sessions</h2>
-          {!upcoming.length ? (
+          {upcoming.length === 0 ? (
             <Card><CardContent className="py-8 text-center text-gray-500">No upcoming sessions. Students book from your calendar.</CardContent></Card>
           ) : (
             <div className="space-y-3">
@@ -143,3 +175,4 @@ export default async function TeacherDashboard() {
     </div>
   )
 }
+
