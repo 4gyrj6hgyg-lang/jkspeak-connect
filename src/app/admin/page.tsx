@@ -18,12 +18,7 @@ export default async function AdminDashboard() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', user.id)
-    .single()
-
+  const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single()
   if (!profile || profile.role !== 'admin') redirect('/')
 
   const admin = getServiceClient()
@@ -35,6 +30,7 @@ export default async function AdminDashboard() {
     { data: sessions },
     { data: allProfiles },
     { data: credits },
+    { data: allSlots },
   ] = await Promise.all([
     admin.from('teachers').select('*, profile:profiles(full_name, email)'),
     admin.from('students').select('*, profile:profiles(full_name, email)'),
@@ -42,7 +38,8 @@ export default async function AdminDashboard() {
     admin.from('sessions').select('*, teacher:teachers(profile:profiles(full_name)), student:students(profile:profiles(full_name))').order('scheduled_at', { ascending: false }),
     admin.from('profiles').select('*').order('full_name'),
     admin.from('class_credits').select('*'),
-      ])
+    admin.from('availability_slots').select('id, slot_start, is_booked, lesson_topic, key_points, teacher_id').gte('slot_start', new Date().toISOString()),
+  ])
 
   const payroll = (teachers ?? []).map((teacher: any) => {
     const completed = (sessions ?? []).filter(
@@ -59,6 +56,22 @@ export default async function AdminDashboard() {
 
   const totalPayroll = payroll.reduce((sum: number, t: any) => sum + t.total_pay, 0)
 
+  // Shape data for AdminCalendar component
+  const teacherSlots = (teachers ?? []).map((t: any) => ({
+    id: t.id,
+    name: t.profile?.full_name ?? 'Unknown',
+    slots: (allSlots ?? []).filter((s: any) => s.teacher_id === t.id),
+  }))
+
+  const studentList = (students ?? []).map((s: any) => {
+    const credit = (credits ?? []).find((c: any) => c.student_id === s.id)
+    return {
+      id: s.id,
+      name: s.profile?.full_name ?? 'Unknown',
+      creditsRemaining: (credit?.total_purchased ?? 0) - (credit?.total_used ?? 0),
+    }
+  })
+
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
@@ -74,32 +87,24 @@ export default async function AdminDashboard() {
 
       <main className="max-w-6xl mx-auto p-6 space-y-6">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <Card>
-            <CardContent className="pt-6 text-center">
-              <p className="text-3xl font-bold text-blue-600">{teachers?.length ?? 0}</p>
-              <p className="text-sm text-gray-500 mt-1">Teachers</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6 text-center">
-              <p className="text-3xl font-bold text-green-600">{students?.length ?? 0}</p>
-              <p className="text-sm text-gray-500 mt-1">Students</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6 text-center">
-              <p className="text-3xl font-bold text-purple-600">
-                {sessions?.filter((s: any) => s.status === 'completed').length ?? 0}
-              </p>
-              <p className="text-sm text-gray-500 mt-1">Sessions Done</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6 text-center">
-              <p className="text-3xl font-bold text-orange-600">{formatCurrency(totalPayroll)}</p>
-              <p className="text-sm text-gray-500 mt-1">Total Payroll</p>
-            </CardContent>
-          </Card>
+          <Card><CardContent className="pt-6 text-center">
+            <p className="text-3xl font-bold text-blue-600">{teachers?.length ?? 0}</p>
+            <p className="text-sm text-gray-500 mt-1">Teachers</p>
+          </CardContent></Card>
+          <Card><CardContent className="pt-6 text-center">
+            <p className="text-3xl font-bold text-green-600">{students?.length ?? 0}</p>
+            <p className="text-sm text-gray-500 mt-1">Students</p>
+          </CardContent></Card>
+          <Card><CardContent className="pt-6 text-center">
+            <p className="text-3xl font-bold text-purple-600">
+              {sessions?.filter((s: any) => s.status === 'completed').length ?? 0}
+            </p>
+            <p className="text-sm text-gray-500 mt-1">Sessions Done</p>
+          </CardContent></Card>
+          <Card><CardContent className="pt-6 text-center">
+            <p className="text-3xl font-bold text-orange-600">{formatCurrency(totalPayroll)}</p>
+            <p className="text-sm text-gray-500 mt-1">Total Payroll</p>
+          </CardContent></Card>
         </div>
 
         <AdminTabs
@@ -110,7 +115,9 @@ export default async function AdminDashboard() {
           payroll={payroll}
           allProfiles={allProfiles ?? []}
           credits={credits ?? []}
-                  />
+          teacherSlots={teacherSlots}
+          studentList={studentList}
+        />
       </main>
     </div>
   )

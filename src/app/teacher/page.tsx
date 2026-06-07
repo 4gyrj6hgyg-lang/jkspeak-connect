@@ -64,7 +64,7 @@ export default async function TeacherDashboard() {
   // Availability slots (past week + future)
   const { data: slots } = await admin
     .from('availability_slots')
-    .select('id, slot_start, is_booked')
+    .select('id, slot_start, is_booked, lesson_topic, key_points')
     .eq('teacher_id', teacher.id)
     .gte('slot_start', new Date(Date.now() - 7 * 86400000).toISOString())
 

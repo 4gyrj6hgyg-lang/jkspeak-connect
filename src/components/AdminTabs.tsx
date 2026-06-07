@@ -9,6 +9,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import { createUser, assignTeacherStudent, removeAssignment, updateTeacherRate } from '@/app/admin/actions'
 import { setStudentCredits } from '@/app/admin/calendar-actions'
+import AdminCalendar from '@/components/AdminCalendar'
 
 interface Props {
   teachers: any[]
@@ -18,11 +19,13 @@ interface Props {
   payroll: any[]
   allProfiles: any[]
   credits: any[]
+  teacherSlots: any[]
+  studentList: any[]
 }
 
-type Tab = 'teachers' | 'students' | 'assignments' | 'sessions' | 'payroll'
+type Tab = 'teachers' | 'students' | 'assignments' | 'sessions' | 'payroll' | 'calendar'
 
-export default function AdminTabs({ teachers, students, assignments, sessions, payroll, credits }: Props) {
+export default function AdminTabs({ teachers, students, assignments, sessions, payroll, credits, teacherSlots, studentList }: Props) {
   const [tab, setTab] = useState<Tab>('teachers')
 
   const tabs: { id: Tab; label: string }[] = [
@@ -31,6 +34,7 @@ export default function AdminTabs({ teachers, students, assignments, sessions, p
     { id: 'assignments', label: '🔗 Assignments' },
     { id: 'sessions', label: '📅 Sessions' },
     { id: 'payroll', label: '💰 Payroll' },
+    { id: 'calendar', label: '📆 Calendars' },
   ]
 
   return (
@@ -54,6 +58,7 @@ export default function AdminTabs({ teachers, students, assignments, sessions, p
       {tab === 'assignments' && <AssignmentsTab teachers={teachers} students={students} assignments={assignments} />}
       {tab === 'sessions' && <SessionsTab sessions={sessions} />}
       {tab === 'payroll' && <PayrollTab payroll={payroll} />}
+      {tab === 'calendar' && <AdminCalendar teachers={teacherSlots} students={studentList} />}
     </div>
   )
 }

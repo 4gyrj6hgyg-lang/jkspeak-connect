@@ -46,7 +46,7 @@ export default async function StudentDashboard() {
   const { data: slots } = teacherIds.length > 0
     ? await admin
         .from('availability_slots')
-        .select('id, slot_start, is_booked, teacher_id')
+        .select('id, slot_start, is_booked, teacher_id, lesson_topic, key_points')
         .in('teacher_id', teacherIds)
         .gte('slot_start', new Date().toISOString())
         .order('slot_start', { ascending: true })
