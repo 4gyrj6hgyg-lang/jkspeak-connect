@@ -177,3 +177,93 @@ export async function setStudentCredits(studentId: string, totalPurchased: numbe
   if (error) return { error: error.message }
   return { success: true }
 }
+
+
+// Teacher: mark session complete + deduct 1 credit from student
+export async function completeSession(sessionId: string) {
+  'use server'
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not authenticated' }
+
+  const admin = getAdminClient()
+
+  // Get the session to find student_id, and verify it's not already completed
+  const { data: session, error: sessionErr } = await admin
+    .from('sessions')
+    .select('id, status, student_id')
+    .eq('id', sessionId)
+    .single()
+
+  if (sessionErr || !session) return { error: 'Session not found' }
+  if (session.status === 'completed') return { error: 'Already completed' }
+
+  // Mark session completed
+  const { error: updateErr } = await admin
+    .from('sessions')
+    .update({ status: 'completed', updated_at: new Date().toISOString() })
+    .eq('id', sessionId)
+
+  if (updateErr) return { error: updateErr.message }
+
+  // Deduct 1 credit from student
+  const { data: credits, error: creditErr } = await admin
+    .from('class_credits')
+    .select('total_used')
+    .eq('student_id', session.student_id)
+    .single()
+
+  if (!creditErr && credits) {
+    await admin
+      .from('class_credits')
+      .update({ total_used: (credits.total_used ?? 0) + 1, updated_at: new Date().toISOString() })
+      .eq('student_id', session.student_id)
+  }
+
+  return { success: true }
+}
+
+
+// Teacher: mark session complete + deduct 1 credit from student
+export async function completeSession(sessionId: string) {
+  'use server'
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not authenticated' }
+
+  const admin = getAdminClient()
+
+  // Get the session to find student_id, and verify it's not already completed
+  const { data: session, error: sessionErr } = await admin
+    .from('sessions')
+    .select('id, status, student_id')
+    .eq('id', sessionId)
+    .single()
+
+  if (sessionErr || !session) return { error: 'Session not found' }
+  if (session.status === 'completed') return { error: 'Already completed' }
+
+  // Mark session completed
+  const { error: updateErr } = await admin
+    .from('sessions')
+    .update({ status: 'completed', updated_at: new Date().toISOString() })
+    .eq('id', sessionId)
+
+  if (updateErr) return { error: updateErr.message }
+
+  // Deduct 1 credit from student
+  const { data: credits, error: creditErr } = await admin
+    .from('class_credits')
+    .select('total_used')
+    .eq('student_id', session.student_id)
+    .single()
+
+  if (!creditErr && credits) {
+    await admin
+      .from('class_credits')
+      .update({ total_used: (credits.total_used ?? 0) + 1, updated_at: new Date().toISOString() })
+      .eq('student_id', session.student_id)
+  }
+
+  return { success: true }
+}

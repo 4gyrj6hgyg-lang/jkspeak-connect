@@ -144,7 +144,7 @@ export default async function TeacherDashboard() {
                       <p className="text-sm text-gray-500 mt-1">with {session.student?.profile?.full_name}</p>
                       <p className="text-sm text-gray-500">{formatDateTime(session.scheduled_at)} · 30 min</p>
                     </div>
-                    <SessionControls sessionId={session.id} currentStatus={session.status} />
+                    <SessionControls sessionId={session.id} currentStatus={session.status} studentName={session.student?.profile?.full_name} />
                   </div>
                 </CardContent></Card>
               ))}
